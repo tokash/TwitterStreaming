@@ -38,6 +38,9 @@
     <Reference Include="SearchEngine">
       <HintPath>..\..\Tweetinvi.0.8.3.22\SearchEngine\bin\Debug\SearchEngine.dll</HintPath>
     </Reference>
+    <Reference Include="SQLServerCommon">
+      <HintPath>..\..\SQLServerCommon\SQLServerCommon\bin\Debug\SQLServerCommon.dll</HintPath>
+    </Reference>
     <Reference Include="Streaminvi">
       <HintPath>..\..\Tweetinvi.0.8.3.22\Streaminvi\bin\Debug\Streaminvi.dll</HintPath>
     </Reference>
