@@ -22,8 +22,10 @@ namespace TwitterStreaming
         string AccessTokenSecret1 = System.Configuration.ConfigurationManager.AppSettings["AccessTokenSecret1"];
 
         private static readonly string dbName = "TweetsDB";
-        internal static readonly string connStringInitial = "Server=TOKASHYOS-PC\\SQLEXPRESS;User Id=sa;Password=tokash30;database=master";
-        internal static readonly string connString = "Server=TOKASHYOS-PC\\SQLEXPRESS;User Id=sa;Password=tokash30;database=" + dbName;
+        private static readonly string sqlserverName = "TOKASHYO-PC";
+
+        internal static readonly string connStringInitial = "Server=" + sqlserverName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=master";
+        internal static readonly string connString = "Server=" + sqlserverName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=" + dbName;
         
         public static string TweetsTableSchema = @"(TweetID nvarchar (25) PRIMARY KEY, UserID nvarchar (25), Tweet nvarchar (4000), TimeOfTweet nvarchar (40))";
         internal static readonly string[] TweetsTableColumns = { "TweetID", "UserID", "Tweet", "TimeOfTweet"};
@@ -67,6 +69,7 @@ namespace TwitterStreaming
         {
             _Token = new Token(AccessToken1, AccessTokenSecret1, ConsumerKey1, ConsumerSecret1);
             _SimpleStream = new SimpleStream(iUrl);
+            _SimpleStream.StreamStopped += new EventHandler<TweetinCore.Events.GenericEventArgs<Exception>>(OnStreamStopped);
             
             //_FilteredStream = new FilteredStream();
 
@@ -80,6 +83,15 @@ namespace TwitterStreaming
             CreateEmptyDB();
         }
 
+        private void OnStreamStopped(object sender, TweetinCore.Events.GenericEventArgs<Exception> e)
+        {
+            _IsStreamStopped = true;
+            if (e.Value != null)
+            {
+                Console.WriteLine(e.Value.ToString());
+            }
+        }
+
         public void GetStreamIntoFile()
         {
             string filename = "Stream_" + DateTime.Now.ToString("dd.MM.yyyy.HH.mm.ss.ffff");
@@ -91,12 +103,29 @@ namespace TwitterStreaming
 
         public void GetTweets(int iNumTweets)
         {
-            _DataHandlerMethod = GetTweetsHandler;
+            //_DataHandlerMethod = GetTweetsHandler;
             Stopwatch timer = new Stopwatch();
 
             timer.Start();
             Console.WriteLine("Started looking for tweets...");
-            _SimpleStream.StartStream(_Token, x => _DataHandlerMethod(x, iNumTweets));
+            _SimpleStream.StartStream(_Token, tweet =>
+            {
+                if (_Tweets.Count < 100 /*iNumTweets*/)
+                {
+                    if (tweet.Hashtags.Count > 0 && tweet.Text.StartsWith("RT") && tweet.Retweeting != null)
+                    {
+                        if (tweet.Retweeting.RetweetCount > 1)
+                        {
+                            _Tweets.Add(tweet.Retweeting);
+                        }
+                    }
+                }
+                else
+                {
+                    _SimpleStream.StopStream();
+                }
+            });
+            
             Console.WriteLine("Finished looking for tweets...");
             timer.Stop();
             Console.WriteLine(String.Format("Looking for tweets took: {0}", timer.Elapsed));
@@ -130,7 +159,6 @@ namespace TwitterStreaming
             }
         }
 
-        //{ "TweetID", "UserID", "Tweet", "TimeOfTweet"};
         private void AddTweetToDB(ITweet iTweet)
         {
             Dictionary<string, string> parameters = new Dictionary<string, string>();
@@ -156,7 +184,6 @@ namespace TwitterStreaming
             }
         }
 
-        //{ "ReTweetID", "UserID", "SourceTweetID", "SourceUserID", "TimeOfReTweet" };
         private void AddReTweetToDB(ITweet iReTweet, ITweet iTweet)
         {
             Dictionary<string, string> parameters = new Dictionary<string, string>();
@@ -216,13 +243,39 @@ namespace TwitterStreaming
             }
         }
 
+        #region DataHandlers
+        private void GetTweets2Handler(ITweet iTweet, int iNumTweets)
+        {
+            if (_IsStreamStopped == false)
+            {
+                if (_Tweets.Count < iNumTweets)
+                {
+                    if (iTweet.Hashtags.Count > 0 && iTweet.Text.StartsWith("RT") && iTweet.Retweeting != null)
+                    {
+                        if (iTweet.Retweeting.RetweetCount > 1)
+                        {
+                            _Tweets.Add(iTweet.Retweeting);
+                        }
+                    }
+
+                    if (_Tweets.Count == iNumTweets)
+                    {
+                        _SimpleStream.StopStream();
+                    }
+                }
+            } 
+        }
+
         private void GetTweetsHandler(TweetinCore.Interfaces.ITweet iTweet, int iNumTweets)
         {
             if (_Tweets.Count < iNumTweets)
             {
-                if (iTweet.Hashtags.Count > 0 && !iTweet.Text.StartsWith("RT") && iTweet.Retweeted == true)
+                if (iTweet.Hashtags.Count > 0 && iTweet.Text.StartsWith("RT") && iTweet.Retweeting != null)
                 {
-                    _Tweets.Add(iTweet);
+                    if (iTweet.Retweeting.RetweetCount > 1)
+                    {
+                        _Tweets.Add(iTweet.Retweeting);
+                    }
                 }
             }
             else
@@ -235,16 +288,20 @@ namespace TwitterStreaming
         {
             using (StreamWriter writer = new StreamWriter(iFileName, true))
             {
+
                 writer.WriteLine(iTweet.Text);
             }
-        }
+        } 
+        #endregion
 
+        #region EventsHandlers
         void TimerElapsed(object sender, ElapsedEventArgs e)
         {
             //_SimpleStream.StopStream();
             _FilteredStream.StopStream();
             _IsStreamStopped = true;
-        }
+        } 
+        #endregion
         
     }
 }
