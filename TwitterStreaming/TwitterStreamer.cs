@@ -77,7 +77,7 @@ namespace TwitterStreaming
             //_UserStream = new UserStream();
             _Timer.Interval = iPeriod;
             _Timer.AutoReset = true; //Stops it from repeating
-            //_Timer.Start();
+            _Timer.Start();
             _Timer.Elapsed += new ElapsedEventHandler(TimerElapsed);
 
             CreateEmptyDB();
@@ -101,52 +101,78 @@ namespace TwitterStreaming
             //_FilteredStream.StartStream(_Token, x => _DataHandlerMethod(x, filename));
         }
 
-        public void GetTweets(int iNumTweets)
+        public void GetTweets()
         {
             //_DataHandlerMethod = GetTweetsHandler;
-            Stopwatch timer = new Stopwatch();
+            Stopwatch swTimer = new Stopwatch();
 
-            timer.Start();
-            Console.WriteLine("Started looking for tweets...");
-            _SimpleStream.StartStream(_Token, tweet =>
+            swTimer.Start();
+            Console.WriteLine(string.Format("{0}: Started looking for tweets...", DateTime.Now));
+
+
+            while (_Tweets.Count < 100)
             {
-                if (_Tweets.Count < 100 /*iNumTweets*/)
+                _SimpleStream.StartStream(_Token, tweet =>
                 {
-                    if (tweet.Hashtags.Count > 0 && tweet.Text.StartsWith("RT") && tweet.Retweeting != null)
+                    //if (_Tweets.Count < 10 /*iNumTweets*/)
+                    //{
+                    //if (tweet.Hashtags.Count > 0 && tweet.Text.StartsWith("RT") && tweet.Retweeting != null)
+                    //{
+                    if (tweet.Retweeting != null)
                     {
-                        if (tweet.Retweeting.RetweetCount > 1)
+                        if ((int)tweet.Retweeting.RetweetCount > 10 && tweet.Retweeting.Hashtags.Count > 0)
                         {
                             _Tweets.Add(tweet.Retweeting);
                         }
                     }
-                }
-                else
-                {
-                    _SimpleStream.StopStream();
-                }
-            });
+                    //}
+                    //}
+                    //else
+                    //{
+                    //    _SimpleStream.StopStream();
+                    //}
+                });
+
+                _Timer.Start();
+            }
             
             Console.WriteLine("Finished looking for tweets...");
-            timer.Stop();
-            Console.WriteLine(String.Format("Looking for tweets took: {0}", timer.Elapsed));
+            swTimer.Stop();
+            Console.WriteLine(String.Format("{0}: Looking for tweets took: {1}", DateTime.Now, swTimer.Elapsed));
 
             int i = 0;
-            foreach (ITweet tweet in _Tweets)
-	        {
-		        Console.WriteLine(String.Format("Started getting retweets for tweet:...", tweet.IdStr));
-                tweet.Retweets = tweet.GetRetweets();
-                Console.WriteLine(String.Format("Finished getting retweets for tweet:...", tweet.IdStr));
-
-                i++;
-                Console.WriteLine(String.Format("Tweets to go: {0}", _Tweets.Count - i));
-	        }
-
-            Console.WriteLine("Adding tweets to DB...");
-            foreach (ITweet tweet in _Tweets)
+            while (i < _Tweets.Count)
             {
-                AddTweetToDB(tweet);
-            }
-            Console.WriteLine("Finished adding tweets to DB...");
+                Console.WriteLine(String.Format("{0}: Started getting retweets for tweet:{1} ...", DateTime.Now, _Tweets[i].IdStr));
+                try
+                {
+                    _Tweets[i].Retweets = _Tweets[i].GetRetweets(false, false, _Token);
+
+
+                    Console.WriteLine(String.Format("{0}: Finished getting retweets for tweet:{1}...", DateTime.Now, _Tweets[i].IdStr));
+
+                    Console.WriteLine("Adding tweet to DB...");
+                    AddTweetToDB(_Tweets[i]);
+                    Console.WriteLine("Tweet added to DB...");
+
+                    Console.WriteLine(String.Format("Tweets to go: {0}", _Tweets.Count - i));
+                    i++;
+                }
+                catch (Exception ex)
+                {
+                    //reached limit
+                    if (ex.Message.Contains("429"))
+                    {
+                        Console.WriteLine(string.Format("{0}: Rate limit reached for: {1}, waiting 15 minutes...", DateTime.Now, _Tweets[i].IdStr));
+                        System.Threading.Thread.Sleep(900000);
+                    }
+                    else
+                    {
+                        Console.WriteLine(ex.ToString());
+                        i++;
+                    }
+                }
+            }            
 
         }
 
@@ -163,10 +189,10 @@ namespace TwitterStreaming
         {
             Dictionary<string, string> parameters = new Dictionary<string, string>();
 
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[0]), iTweet.IdStr);
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[1]), iTweet.Creator.IdStr);
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[2]), iTweet.Text);
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[3]), iTweet.CreatedAt.ToString());
+            parameters.Add(String.Format("@{0}", TweetsTableColumns[0]), iTweet.IdStr);
+            parameters.Add(String.Format("@{0}", TweetsTableColumns[1]), iTweet.Creator.IdStr);
+            parameters.Add(String.Format("@{0}", TweetsTableColumns[2]), iTweet.Text);
+            parameters.Add(String.Format("@{0}", TweetsTableColumns[3]), iTweet.CreatedAt.ToString());
             
             try
             {
@@ -188,11 +214,11 @@ namespace TwitterStreaming
         {
             Dictionary<string, string> parameters = new Dictionary<string, string>();
 
-            parameters.Add(String.Format("@{0}", ReTweetsTableSchema[0]), iReTweet.IdStr);
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[1]), iReTweet.Creator.IdStr);
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[2]), iTweet.IdStr);
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[3]), iTweet.IdStr);
-            parameters.Add(String.Format("@{0}", TweetsTableSchema[4]), iReTweet.CreatedAt.ToString());
+            parameters.Add(String.Format("@{0}", RetweetsTableColumns[0]), iReTweet.IdStr);
+            parameters.Add(String.Format("@{0}", RetweetsTableColumns[1]), iReTweet.Creator.IdStr);
+            parameters.Add(String.Format("@{0}", RetweetsTableColumns[2]), iTweet.IdStr);
+            parameters.Add(String.Format("@{0}", RetweetsTableColumns[3]), iTweet.Creator.IdStr);
+            parameters.Add(String.Format("@{0}", RetweetsTableColumns[4]), iReTweet.CreatedAt.ToString());
 
 
             try
@@ -297,8 +323,8 @@ namespace TwitterStreaming
         #region EventsHandlers
         void TimerElapsed(object sender, ElapsedEventArgs e)
         {
-            //_SimpleStream.StopStream();
-            _FilteredStream.StopStream();
+            _SimpleStream.StopStream();
+            //_FilteredStream.StopStream();
             _IsStreamStopped = true;
         } 
         #endregion
