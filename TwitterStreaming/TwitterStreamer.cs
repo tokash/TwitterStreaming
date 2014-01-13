@@ -11,6 +11,7 @@ using TweetinCore.Interfaces;
 using System.Timers;
 using System.IO;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace TwitterStreaming
 {
@@ -122,7 +123,10 @@ namespace TwitterStreaming
                     {
                         if ((int)tweet.Retweeting.RetweetCount > 10 && tweet.Retweeting.Hashtags.Count > 0)
                         {
-                            _Tweets.Add(tweet.Retweeting);
+                            if (!Regex.IsMatch(tweet.Text, "[^\u0000-\u0080]+"))
+                            {
+                                _Tweets.Add(tweet.Retweeting); 
+                            }
                         }
                     }
                     //}
@@ -191,7 +195,7 @@ namespace TwitterStreaming
 
             parameters.Add(String.Format("@{0}", TweetsTableColumns[0]), iTweet.IdStr);
             parameters.Add(String.Format("@{0}", TweetsTableColumns[1]), iTweet.Creator.IdStr);
-            parameters.Add(String.Format("@{0}", TweetsTableColumns[2]), iTweet.Text);
+            parameters.Add(String.Format("@{0}", TweetsTableColumns[2]), iTweet.Text.Replace("\n", ""));
             parameters.Add(String.Format("@{0}", TweetsTableColumns[3]), iTweet.CreatedAt.ToString());
             
             try
