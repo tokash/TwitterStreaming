@@ -13,7 +13,7 @@ namespace TwitterStreaming
     {
         static void Main(string[] args)
         {
-            TwitterStreamer twitterStreamer = new TwitterStreamer("https://stream.twitter.com/1.1/statuses/sample.json", 60000);
+            TwitterStreamer twitterStreamer = new TwitterStreamer("https://stream.twitter.com/1.1/statuses/sample.json", 5000);
             Stopwatch timer = new Stopwatch();
 
             timer.Start();

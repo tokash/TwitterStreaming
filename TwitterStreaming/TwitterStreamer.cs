@@ -12,6 +12,8 @@ using System.Timers;
 using System.IO;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Configuration;
+using System.Data;
 
 namespace TwitterStreaming
 {
@@ -25,8 +27,8 @@ namespace TwitterStreaming
         private static readonly string dbName = "TweetsDB";
         private static readonly string sqlserverName = "TOKASHYO-PC";
 
-        internal static readonly string connStringInitial = "Server=" + sqlserverName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=master";
-        internal static readonly string connString = "Server=" + sqlserverName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=" + dbName;
+        internal static readonly string connStringInitial = "Server=" + Environment.MachineName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=master";
+        internal static readonly string connString = "Server=" + Environment.MachineName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=" + dbName;
         
         public static string TweetsTableSchema = @"(TweetID nvarchar (25) PRIMARY KEY, UserID nvarchar (25), Tweet nvarchar (4000), TimeOfTweet nvarchar (40))";
         internal static readonly string[] TweetsTableColumns = { "TweetID", "UserID", "Tweet", "TimeOfTweet"};
@@ -34,16 +36,20 @@ namespace TwitterStreaming
         public static string ReTweetsTableSchema = @"(ReTweetID nvarchar (25) PRIMARY KEY, UserID nvarchar (25), SourceTweetID nvarchar (25), SourceUserID nvarchar (25), TimeOfReTweet nvarchar (40))";
         internal static readonly string[] RetweetsTableColumns = { "ReTweetID", "UserID", "SourceTweetID", "SourceUserID", "TimeOfReTweet" };
 
-        private static readonly string[] tableNames = { "Tweets", "Retweets" };
+        public static string TweetsHashtagsTableSchema = @"(TweetID nvarchar (25), Hashtag nvarchar (140))";
+        internal static readonly string[] TweetsHashtagsTableColumns = { "TweetID", "Hashtag" };
+
+        private static readonly string[] tableNames = { "Tweets", "Retweets", "TweetsHashtags"};
         private static readonly string[] tableSchemas = { "CREATE TABLE Tweets (TweetID nvarchar (25) PRIMARY KEY, UserID nvarchar (25), Tweet nvarchar (4000), TimeOfTweet nvarchar (40))",
-                                                          "CREATE TABLE Retweets (ReTweetID nvarchar (25) PRIMARY KEY, UserID nvarchar (25), SourceTweetID nvarchar (25), SourceUserID nvarchar (25), TimeOfReTweet nvarchar (40))"};
+                                                          "CREATE TABLE Retweets (ReTweetID nvarchar (25) PRIMARY KEY, UserID nvarchar (25), SourceTweetID nvarchar (25), SourceUserID nvarchar (25), TimeOfReTweet nvarchar (40))",
+                                                          "CREATE TABLE TweetsHashtags (TweetID nvarchar (25), Hashtag nvarchar (140))"};
 
         private static readonly string sqlCommandCreateDB = "CREATE DATABASE " + dbName + " ON PRIMARY " +
                 "(NAME = " + dbName + ", " +
-                "FILENAME = 'D:\\" + dbName + ".mdf', " +
+                "FILENAME = 'C:\\" + dbName + ".mdf', " +
                 "SIZE = 3MB, MAXSIZE = 10MB, FILEGROWTH = 10%) " +
                 "LOG ON (NAME = " + dbName + "_LOG, " +
-                "FILENAME = 'D:\\" + dbName + ".ldf', " +
+                "FILENAME = 'C:\\" + dbName + ".ldf', " +
                 "SIZE = 1MB, " +
                 "MAXSIZE = 100MB, " +
                 "FILEGROWTH = 10%)";
@@ -59,6 +65,7 @@ namespace TwitterStreaming
         bool _IsStreamStopped = false;
         Action<TweetinCore.Interfaces.ITweet, string> _FileDataHandlerMethod;
         Action<TweetinCore.Interfaces.ITweet, int> _DataHandlerMethod;
+        int _NumberOfTweetsToGet = 0;
         #endregion
 
         /// <summary>
@@ -76,6 +83,9 @@ namespace TwitterStreaming
 
             //_FilteredStream.AddTrack("#android");
             //_UserStream = new UserStream();
+
+            _NumberOfTweetsToGet = int.Parse(ConfigurationManager.AppSettings["NumberOfTweetsToGet"]);
+
             _Timer.Interval = iPeriod;
             _Timer.AutoReset = true; //Stops it from repeating
             _Timer.Start();
@@ -111,30 +121,20 @@ namespace TwitterStreaming
             Console.WriteLine(string.Format("{0}: Started looking for tweets...", DateTime.Now));
 
 
-            while (_Tweets.Count < 100)
+            while (_Tweets.Count < _NumberOfTweetsToGet)
             {
                 _SimpleStream.StartStream(_Token, tweet =>
                 {
-                    //if (_Tweets.Count < 10 /*iNumTweets*/)
-                    //{
-                    //if (tweet.Hashtags.Count > 0 && tweet.Text.StartsWith("RT") && tweet.Retweeting != null)
-                    //{
-                    if (tweet.Retweeting != null)
+                    if (!Regex.IsMatch(tweet.Text, "[^\u0000-\u0080]+")) //get latin tweets only
                     {
-                        if ((int)tweet.Retweeting.RetweetCount > 10 && tweet.Retweeting.Hashtags.Count > 0)
+                        //_Tweets.Add(tweet.Retweeting); 
+                        _Tweets.Add(tweet);
+
+                        if (tweet.Retweeting != null)
                         {
-                            if (!Regex.IsMatch(tweet.Text, "[^\u0000-\u0080]+"))
-                            {
-                                _Tweets.Add(tweet.Retweeting); 
-                            }
+                            _Tweets.Add(tweet.Retweeting);
                         }
                     }
-                    //}
-                    //}
-                    //else
-                    //{
-                    //    _SimpleStream.StopStream();
-                    //}
                 });
 
                 _Timer.Start();
@@ -147,35 +147,40 @@ namespace TwitterStreaming
             int i = 0;
             while (i < _Tweets.Count)
             {
-                Console.WriteLine(String.Format("{0}: Started getting retweets for tweet:{1} ...", DateTime.Now, _Tweets[i].IdStr));
-                try
+
+                if (_Tweets[i].RetweetCount > 0)
                 {
-                    _Tweets[i].Retweets = _Tweets[i].GetRetweets(false, false, _Token);
-
-
-                    Console.WriteLine(String.Format("{0}: Finished getting retweets for tweet:{1}...", DateTime.Now, _Tweets[i].IdStr));
-
-                    Console.WriteLine("Adding tweet to DB...");
-                    AddTweetToDB(_Tweets[i]);
-                    Console.WriteLine("Tweet added to DB...");
-
-                    Console.WriteLine(String.Format("Tweets to go: {0}", _Tweets.Count - i));
-                    i++;
-                }
-                catch (Exception ex)
-                {
-                    //reached limit
-                    if (ex.Message.Contains("429"))
+                    try
                     {
-                        Console.WriteLine(string.Format("{0}: Rate limit reached for: {1}, waiting 15 minutes...", DateTime.Now, _Tweets[i].IdStr));
-                        System.Threading.Thread.Sleep(900000);
+                        Console.WriteLine(String.Format("{0}: Started getting retweets for tweet:{1} ...", DateTime.Now, _Tweets[i].IdStr));
+                        _Tweets[i].Retweets = _Tweets[i].GetRetweets(false, false, _Token);
+                        Console.WriteLine(String.Format("{0}: Finished getting retweets for tweet:{1}...", DateTime.Now, _Tweets[i].IdStr));
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        Console.WriteLine(ex.ToString());
-                        i++;
+                        //reached limit
+                        if (ex.Message.Contains("429"))
+                        {
+                            Console.WriteLine(string.Format("{0}: Rate limit reached for: {1}, waiting 15 minutes...", DateTime.Now, _Tweets[i].IdStr));
+                            System.Threading.Thread.Sleep(900000);
+                        }
+                        else
+                        {
+                            Console.WriteLine(ex.ToString());
+                            i++;
+                        }
                     }
                 }
+                else
+                {
+                    Console.WriteLine(string.Format("Tweet {0} as no retweets.", _Tweets[i].IdStr));
+                }
+
+                Console.WriteLine(string.Format("Adding tweet {0} to DB...", _Tweets[i].IdStr));
+                AddTweetToDB(_Tweets[i]);
+                Console.WriteLine(string.Format("Tweet {0} added to DB...", _Tweets[i].IdStr));
+                Console.WriteLine(String.Format("Tweets to go: {0}", _Tweets.Count - i));
+                i++;
             }            
 
         }
@@ -200,7 +205,12 @@ namespace TwitterStreaming
             
             try
             {
-                SQLServerCommon.SQLServerCommon.Insert("Tweets", connString, TweetsTableColumns, parameters);
+                string sqlCmd = string.Format("select TweetID from tweets where TweetID='{0}'", iTweet.IdStr);
+                DataTable result = SQLServerCommon.SQLServerCommon.ExecuteQuery(sqlCmd, connString);
+                if (result.Rows.Count == 0)
+                {
+                    SQLServerCommon.SQLServerCommon.Insert("Tweets", connString, TweetsTableColumns, parameters); 
+                }
             }
             catch (Exception)
             {
@@ -208,9 +218,20 @@ namespace TwitterStreaming
                 throw;
             }
 
-            foreach (ITweet retweet in iTweet.Retweets)
+            if (iTweet.Hashtags != null)
             {
-                AddReTweetToDB(retweet, iTweet);
+                foreach (IHashTagEntity hashtag in iTweet.Hashtags)
+                {
+                    AddHashTagToDB(iTweet.IdStr, hashtag.Text);
+                }
+            }
+
+            if (iTweet.Retweets != null)
+            {
+                foreach (ITweet retweet in iTweet.Retweets)
+                {
+                    AddReTweetToDB(retweet, iTweet);
+                }
             }
         }
 
@@ -227,7 +248,35 @@ namespace TwitterStreaming
 
             try
             {
-                SQLServerCommon.SQLServerCommon.Insert("Retweets", connString, RetweetsTableColumns, parameters);
+                string sqlCmd = string.Format("select ReTweetID from Retweets where ReTweetID='{0}'", iReTweet.IdStr);
+                DataTable result = SQLServerCommon.SQLServerCommon.ExecuteQuery(sqlCmd, connString);
+                if (result.Rows.Count == 0)
+                {
+                    SQLServerCommon.SQLServerCommon.Insert("Retweets", connString, RetweetsTableColumns, parameters);
+                }
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
+        }
+
+        private void AddHashTagToDB(string iTweetID, string iHashTag)
+        {
+            Dictionary<string, string> parameters = new Dictionary<string, string>();
+
+            parameters.Add(String.Format("@{0}", TweetsHashtagsTableColumns[0]), iTweetID);
+            parameters.Add(String.Format("@{0}", TweetsHashtagsTableColumns[1]), iHashTag);
+
+            try
+            {
+                string sqlCmd = string.Format("select TweetID from TweetsHashtags where TweetID='{0}' and Hashtag='{1}'", iTweetID, iHashTag);
+                DataTable result = SQLServerCommon.SQLServerCommon.ExecuteQuery(sqlCmd, connString);
+                if (result.Rows.Count == 0)
+                {
+                    SQLServerCommon.SQLServerCommon.Insert("TweetsHashtags", connString, TweetsHashtagsTableColumns, parameters);
+                }
             }
             catch (Exception)
             {
@@ -242,15 +291,23 @@ namespace TwitterStreaming
             try
             {
                 //Create DB
+                
                 if (!SQLServerCommon.SQLServerCommon.IsDatabaseExists(connStringInitial, dbName))//connStringInitial, dbName))
                 {
+                    Console.WriteLine(string.Format("Creating DB: {0}", dbName));
                     SQLServerCommon.SQLServerCommon.ExecuteNonQuery(sqlCommandCreateDB, connStringInitial);
+                    Console.WriteLine(string.Format("Creating DB: {0} - Succeeded.", dbName));
 
                     foreach (string tableName in tableNames)
                     {
+                        Console.WriteLine(string.Format("Creating Table: {0}", tableName));
+                        Console.WriteLine(string.Format("With the following schema: {0}", tableSchemas[i]));
                         SQLServerCommon.SQLServerCommon.ExecuteNonQuery(tableSchemas[i], connString);
-                    }
+                        Console.WriteLine(string.Format("Creating Table: {0} - Succeeded.", tableName));
+
                         i++;
+                    }
+                        
                 }
                 else
                 {
@@ -260,7 +317,10 @@ namespace TwitterStreaming
                     {
                         if (SQLServerCommon.SQLServerCommon.IsTableExists(connString, dbName, tableName) == false)
                         {
+                            Console.WriteLine(string.Format("Creating Table: {0}", tableName));
+                            Console.WriteLine(string.Format("With the following schema: {0}", tableSchemas[i]));
                             SQLServerCommon.SQLServerCommon.ExecuteNonQuery(tableSchemas[i], connString);
+                            Console.WriteLine(string.Format("Creating Table: {0} - Succeeded.", tableName));
                         }
                         i++;
                     }
