@@ -14,6 +14,8 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Configuration;
 using System.Data;
+using System.Collections.Specialized;
+using Tweetinvi;
 
 namespace TwitterStreaming
 {
@@ -24,8 +26,9 @@ namespace TwitterStreaming
         string AccessToken1 = System.Configuration.ConfigurationManager.AppSettings["AccessToken1"];
         string AccessTokenSecret1 = System.Configuration.ConfigurationManager.AppSettings["AccessTokenSecret1"];
 
-        private static readonly string dbName = "TweetsDB";
-        private static readonly string sqlserverName = "TOKASHYO-PC";
+        private static readonly string DBNamePath = System.Configuration.ConfigurationManager.AppSettings["DBNamePath"];
+        private static readonly string dbName = System.Configuration.ConfigurationManager.AppSettings["DBName"];
+        private static readonly string sqlserverName = System.Configuration.ConfigurationManager.AppSettings["SQLServerName"];
 
         internal static readonly string connStringInitial = "Server=" + Environment.MachineName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=master";
         internal static readonly string connString = "Server=" + Environment.MachineName + "\\SQLEXPRESS;User Id=sa;Password=tokash30;database=" + dbName;
@@ -46,10 +49,10 @@ namespace TwitterStreaming
 
         private static readonly string sqlCommandCreateDB = "CREATE DATABASE " + dbName + " ON PRIMARY " +
                 "(NAME = " + dbName + ", " +
-                "FILENAME = 'C:\\" + dbName + ".mdf', " +
+                "FILENAME = '" + DBNamePath + dbName + ".mdf', " +
                 "SIZE = 3MB, MAXSIZE = 10MB, FILEGROWTH = 10%) " +
                 "LOG ON (NAME = " + dbName + "_LOG, " +
-                "FILENAME = 'C:\\" + dbName + ".ldf', " +
+                "FILENAME = '" + DBNamePath + dbName + ".ldf', " +
                 "SIZE = 1MB, " +
                 "MAXSIZE = 100MB, " +
                 "FILEGROWTH = 10%)";
@@ -66,6 +69,9 @@ namespace TwitterStreaming
         Action<TweetinCore.Interfaces.ITweet, string> _FileDataHandlerMethod;
         Action<TweetinCore.Interfaces.ITweet, int> _DataHandlerMethod;
         int _NumberOfTweetsToGet = 0;
+        List<string> _Keywords = new List<string>();
+        List<string> _Hashtags = new List<string>();
+        NameValueCollection _ApplicationSettings = new NameValueCollection();
         #endregion
 
         /// <summary>
@@ -91,7 +97,25 @@ namespace TwitterStreaming
             _Timer.Start();
             _Timer.Elapsed += new ElapsedEventHandler(TimerElapsed);
 
+            ReadConfigurationSection("Keywords", ref _Keywords);
+            ReadConfigurationSection("Hashtags", ref _Hashtags);
+
             CreateEmptyDB();
+        }
+
+        private void ReadConfigurationSection(string iConfigurationSection, ref List<string> oContainer)
+        {
+            NameValueCollection temp = (NameValueCollection)ConfigurationManager.GetSection(iConfigurationSection);
+
+            foreach (string key in temp)
+            {
+                oContainer.Add(temp[key]);
+            }
+        }
+
+        private void ReadConfigurationSection(string iConfigurationSection, ref NameValueCollection oContainer)
+        {
+            oContainer = (NameValueCollection)ConfigurationManager.GetSection(iConfigurationSection);
         }
 
         private void OnStreamStopped(object sender, TweetinCore.Events.GenericEventArgs<Exception> e)
@@ -112,6 +136,19 @@ namespace TwitterStreaming
             //_FilteredStream.StartStream(_Token, x => _DataHandlerMethod(x, filename));
         }
 
+        private bool IstMatch(string iMessage, string iSearchPattern)
+        {
+            bool retVal = false;
+
+            
+            if (Regex.IsMatch(iMessage, iSearchPattern))
+            {
+                retVal = true;
+            }           
+
+            return retVal;
+        }
+
         public void GetTweets()
         {
             //_DataHandlerMethod = GetTweetsHandler;
@@ -125,16 +162,20 @@ namespace TwitterStreaming
             {
                 _SimpleStream.StartStream(_Token, tweet =>
                 {
+                    
                     if (!Regex.IsMatch(tweet.Text, "[^\u0000-\u0080]+")) //get latin tweets only
                     {
-                        //_Tweets.Add(tweet.Retweeting); 
-                        _Tweets.Add(tweet);
-
-                        if (tweet.Retweeting != null)
+                        if (IsContainKeywords(tweet.Text) || IsContainsHashtag(tweet.Hashtags))
                         {
-                            _Tweets.Add(tweet.Retweeting);
+                            //_Tweets.Add(tweet.Retweeting);
+                            _Tweets.Add(tweet);
+
+                            if (tweet.Retweeting != null)
+                            {
+                                _Tweets.Add(tweet.Retweeting);
+                            }
                         }
-                    }
+                    } 
                 });
 
                 _Timer.Start();
@@ -183,6 +224,40 @@ namespace TwitterStreaming
                 i++;
             }            
 
+        }
+
+        private bool IsContainKeywords(string iTweetMessage)
+        {
+            bool isFound = false;
+
+            foreach (string word in _Keywords)
+            {
+                if (IstMatch(iTweetMessage, string.Format(" (?i){0} ", word)))
+                {
+                    isFound = true;
+                    break;
+                }
+            }
+
+            return isFound;
+        }
+
+        private bool IsContainsHashtag(List<IHashTagEntity> iHashtags)
+        {
+            bool isFound = false;
+
+            if (iHashtags != null && iHashtags.Count > 0)
+            {
+                foreach (IHashTagEntity hashtag in iHashtags)
+                {
+                    if (_Hashtags.Contains(hashtag.Text))
+                    {
+                        isFound = true;
+                    }
+                }
+            }
+
+            return isFound;
         }
 
         public void PrintTweets()
