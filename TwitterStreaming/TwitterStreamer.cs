@@ -97,19 +97,27 @@ namespace TwitterStreaming
             _Timer.Start();
             _Timer.Elapsed += new ElapsedEventHandler(TimerElapsed);
 
-            ReadConfigurationSection("Keywords", ref _Keywords);
-            ReadConfigurationSection("Hashtags", ref _Hashtags);
+            ReadConfigurationSection("Keywords", ref _Keywords, true);
+            ReadConfigurationSection("Hashtags", ref _Hashtags, false);
 
             CreateEmptyDB();
         }
 
-        private void ReadConfigurationSection(string iConfigurationSection, ref List<string> oContainer)
+        private void ReadConfigurationSection(string iConfigurationSection, ref List<string> oContainer, bool iMakeLowercase)
         {
             NameValueCollection temp = (NameValueCollection)ConfigurationManager.GetSection(iConfigurationSection);
 
             foreach (string key in temp)
             {
-                oContainer.Add(temp[key]);
+
+                if (iMakeLowercase)
+                {
+                    oContainer.Add(temp[key].ToLower());
+                }
+                else
+                {
+                    oContainer.Add(temp[key]);
+                }
             }
         }
 
@@ -232,7 +240,8 @@ namespace TwitterStreaming
 
             foreach (string word in _Keywords)
             {
-                if (IstMatch(iTweetMessage, string.Format(" (?i){0} ", word)))
+                string wordToLower = word.ToLower();
+                if (IstMatch(iTweetMessage, string.Format(" (?i){0} ", wordToLower)))
                 {
                     isFound = true;
                     break;
